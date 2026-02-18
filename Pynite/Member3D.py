@@ -344,11 +344,12 @@ class Member3D():
 
         # Calculate the non-material load-based mass from the load combination
         load_mass, x = self._calc_load_mass(mass_combo_name, mass_direction, gravity)
-        # Use consistent formulation for load-based mass too
-        if load_mass > 0:
-            load_consistent = self._consistent_from_total_mass(load_mass)
-        else:
-            load_consistent = zeros((12, 12))
+        
+        # Consistent mass from external loads
+        load_consistent = self._consistent_from_total_mass(load_mass)
+
+        # Consistent mass from self-weight loads (material density)
+        material_mass = self.consistent_m(mass_combo_name, gravity)
         
         return load_consistent + material_mass
 
