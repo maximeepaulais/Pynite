@@ -344,12 +344,92 @@ class Member3D():
 
         # Calculate the non-material load-based mass from the load combination
         load_mass, x = self._calc_load_mass(mass_combo_name, mass_direction, gravity)
+        # Use consistent formulation for load-based mass too
+        if load_mass > 0:
+            load_consistent = self._consistent_from_total_mass(load_mass)
+        else:
+            load_consistent = zeros((12, 12))
+        
+        return load_consistent + material_mass
 
-        # Calculate the lumped mass from the loads, and the consitent mass from the self-weight loads
-        lumped_mass = self.lumped_m(load_mass, x)
-        material_mass = self.consistent_m(mass_combo_name, gravity)
+    def _consistent_from_total_mass(self, total_mass: float) -> 'NDArray[float64]':
+    """Builds a consistent mass matrix from a known total mass.
 
-        return lumped_mass + material_mass
+    Uses the same Euler-Bernoulli beam consistent mass formulation as
+    ``consistent_m``, but accepts an explicit total element mass rather
+    than deriving it from self-weight loads and material density.
+
+    The standard consistent mass matrix for a 3-D beam element is:
+
+        M = (m_total / 420) * [coefficient matrix]
+
+    where ``m_total`` is the total distributed mass over the element
+    length.  The 12×12 coefficient matrix is symmetric and couples
+    translational and rotational DOFs, which is critical for accurate
+    higher-mode frequencies.
+
+    Parameters
+    ----------
+    total_mass : float
+        The total mass attributed to this element from external loads
+        (in solver-consistent mass units, e.g. kN·s²/m when forces
+        are in kN and lengths in m).
+
+    Returns
+    -------
+    NDArray[float64]
+        12×12 consistent mass matrix in local coordinates.
+    """
+    from numpy import array, zeros
+
+    if abs(total_mass) < 1e-14:
+        return zeros((12, 12))
+
+    J = self.section.J
+    A = self.section.A
+    L = self.L()
+
+    #        dxi     dyi     dzi      rxi      ryi        rzi
+    #        dxj     dyj     dzj      rxj      ryj        rzj
+    m_coeff = array([
+        [140,    0,      0,       0,       0,         0,
+         70,     0,      0,       0,       0,         0        ],  # dxi
+
+        [0,      156,    0,       0,       0,         22*L,
+         0,      54,     0,       0,       0,         -13*L    ],  # dyi
+
+        [0,      0,      156,     0,       -22*L,     0,
+         0,      0,      54,      0,       13*L,      0        ],  # dzi
+
+        [0,      0,      0,       140*J/A, 0,         0,
+         0,      0,      0,       70*J/A,  0,         0        ],  # rxi
+
+        [0,      0,      -22*L,   0,       4*L**2,    0,
+         0,      0,      -13*L,   0,       -3*L**2,   0        ],  # ryi
+
+        [0,      22*L,   0,       0,       0,         4*L**2,
+         0,      13*L,   0,       0,       0,         -3*L**2  ],  # rzi
+
+        [70,     0,      0,       0,       0,         0,
+         140,    0,      0,       0,       0,         0        ],  # dxj
+
+        [0,      54,     0,       0,       0,         13*L,
+         0,      156,    0,       0,       0,         -22*L    ],  # dyj
+
+        [0,      0,      54,      0,       -13*L,     0,
+         0,      0,      156,     0,       22*L,      0        ],  # dzj
+
+        [0,      0,      0,       70*J/A,  0,         0,
+         0,      0,      0,       140*J/A, 0,         0        ],  # rxj
+
+        [0,      0,      13*L,    0,       -3*L**2,   0,
+         0,      0,      22*L,    0,       4*L**2,    0        ],  # ryj
+
+        [0,      -13*L,  0,       0,       0,         -3*L**2,
+         0,      -22*L,  0,       0,       0,         4*L**2   ],  # rzj
+    ])
+
+    return m_coeff * (abs(total_mass) / 420)
 
     def consistent_m(self, mass_combo_name, gravity: float = 1.0) -> NDArray[float64]:
 
@@ -429,7 +509,7 @@ class Member3D():
 
         # Distribute half mass to each node's translational DOFs
         # TODO: Distribute the mass based on distance from each load instead
-        i_node_mass = load_mass*(1 - x)/L
+        i_node_mass = load_mass*(L - x)/L
         j_node_mass = load_mass*x/L
         m[0, 0] = i_node_mass   # FX i-node
         m[1, 1] = i_node_mass   # FY i-node
@@ -455,18 +535,27 @@ class Member3D():
         return m
 
     def _calc_load_mass(self, mass_combo_name: str, mass_direction: str = 'Y', gravity: float = 1.0) -> float:
-        """ Calculates the total mass from a load combination in a specific local direction.
-
-        :param mass_combo_name: Name of the load combination to use for mass calculation.
-        :type mass_combo_name: str
-        :param mass_direction: Local direction component to extract: 'X', 'Y', or 'Z'. Defaults to 'Y'.
-        :type mass_direction: str, optional
-        :param gravity: The acceleration due to gravity used for load to mass conversion. Defaults to 1.0.
-        :type gravity: float, optional
-        :raises NameError: Occurs if `mass_combo_name` is invalid.
-        :return: Total mass in the specified local direction (absolute value) and it's location along the member
-        :rtype: List[float, float]
+        """Calculates the total mass from a load combination in a specific
+        local direction, along with the position of the mass centroid.
+    
+        Parameters
+        ----------
+        mass_combo_name : str
+            Name of the load combination to use for mass calculation.
+        mass_direction : str, optional
+            Local direction component to extract: 'X', 'Y', or 'Z'.
+            Defaults to 'Y'.
+        gravity : float, optional
+            Acceleration due to gravity for load-to-mass conversion.
+            Defaults to 1.0.
+    
+        Returns
+        -------
+        list[float, float]
+            [total_mass, centroid_x] where total_mass is always positive
+            and centroid_x is the distance from the i-node along the member.
         """
+        from numpy import array, dot
 
         # Get the mass load combination
         try:
@@ -489,110 +578,120 @@ class Member3D():
         elif mass_direction == 'Z':
             m_vector = array([0.0, 0.0, 1.0])
 
-        # Sum forces from point loads
-        # Step through each point load in the member
+        # ------------------------------------------------------------------
+        # Sum forces from POINT LOADS
+        # ------------------------------------------------------------------
         for pt_load in self.PtLoads:
 
-            # Step through each load case and load factor in the mass load combo
+            load_dir, P, x, load_case = pt_load
+
             for case, factor in mass_combo.factors.items():
+                if load_case != case:
+                    continue
+    
+                # Convert the point load to a global force vector
+                if load_dir == 'Fx':
+                    P_global = T_local.T @ array([P, 0, 0])
+                elif load_dir == 'Fy':
+                    P_global = T_local.T @ array([0, P, 0])
+                elif load_dir == 'Fz':
+                    P_global = T_local.T @ array([0, 0, P])
+                elif load_dir == 'FX':
+                    P_global = array([P, 0, 0])
+                elif load_dir == 'FY':
+                    P_global = array([0, P, 0])
+                elif load_dir == 'FZ':
+                    P_global = array([0, 0, P])
+                else:
+                    P_global = array([0, 0, 0])
+    
+                # Project onto mass direction
+                P_m_comp = dot(P_global, m_vector)
+    
+                sum_force += factor * P_m_comp
+                sum_force_x += factor * P_m_comp * x
 
-                # Retrive the load's components for clearer reference below
-                load_dir, P, x, load_case = pt_load
-
-                # Check if this point load is used in this load combo
-                if load_case == case:
-
-                    # Convert the point load to a global vector
-                    if load_dir == 'Fx':
-                        P_global = T_local.T() @ array([P, 0, 0]) @ T_local
-                        P_global = T_local.T() @ array([P, 0, 0]) @ T_local
-                    elif load_dir == 'Fy':
-                        P_global = T_local.T() @ array([0, P, 0]) @ T_local
-                        P_global = T_local.T() @ array([0, P, 0]) @ T_local
-                    elif load_dir == 'Fz':
-                        P_global = T_local.T() @ array([0, 0, P]) @ T_local
-                        P_global = T_local.T() @ array([0, 0, P]) @ T_local
-                    elif load_dir == 'FX':
-                        P_global = array([P, 0, 0])
-                        P_global = array([P, 0, 0])
-                    elif load_dir == 'FY':
-                        P_global = array([0, P, 0])
-                        P_global = array([0, P, 0])
-                    elif load_dir == 'FZ':
-                        P_global = array([0, 0, P])
-                        P_global = array([0, 0, P])
-                    else:
-                        # Assume zero for any other load directions
-                        P_global = array([0, 0, 0])
-
-                    # Calculate the load component acting in the mass direction
-                    P_m_comp = dot(P_global, m_vector)
-
-                    # Sum the total for the load component
-                    sum_force += factor*P_m_comp
-                    sum_force_x += factor*P_m_comp*x
-
-        # Sum forces from distributed loads
+        # ------------------------------------------------------------------
+        # Sum forces from DISTRIBUTED LOADS
+        # ------------------------------------------------------------------
         for dist_load in self.DistLoads:
 
             # Retrive the load's components for clearer reference below
             load_dir, w1, w2, x1, x2, load_case, self_weight = dist_load
 
-            # Don't add masses for self-weight loads. They will be added elsewhere using a consistent mass matrix, rather than a lumped mass matrix
-            if not self_weight:
+            # Self-weight loads are handled separately via consistent_m
+            if self_weight:
+                continue
+    
+            for case, factor in mass_combo.factors.items():
+                if load_case != case:
+                    continue
+    
+                # Convert start/end intensities to global vectors
+                if load_dir == 'Fx':
+                    w1_global = T_local.T @ array([w1, 0, 0])
+                    w2_global = T_local.T @ array([w2, 0, 0])
+                elif load_dir == 'Fy':
+                    w1_global = T_local.T @ array([0, w1, 0])
+                    w2_global = T_local.T @ array([0, w2, 0])
+                elif load_dir == 'Fz':
+                    w1_global = T_local.T @ array([0, 0, w1])
+                    w2_global = T_local.T @ array([0, 0, w2])
+                elif load_dir == 'FX':
+                    w1_global = array([w1, 0, 0])
+                    w2_global = array([w2, 0, 0])
+                elif load_dir == 'FY':
+                    w1_global = array([0, w1, 0])
+                    w2_global = array([0, w2, 0])
+                elif load_dir == 'FZ':
+                    w1_global = array([0, 0, w1])
+                    w2_global = array([0, 0, w2])
+                else:
+                    w1_global = array([0, 0, 0])
+                    w2_global = array([0, 0, 0])
+    
+                # Project onto mass direction
+                w1_m = dot(w1_global, m_vector)
+                w2_m = dot(w2_global, m_vector)
+    
+                # Resultant force: area of the trapezoid
+                load_length = x2 - x1
+                resultant = (w1_m + w2_m) / 2 * load_length
+    
+                sum_force += factor * resultant
+    
+                # Centroid of trapezoidal load about the member origin
+                # -------------------------------------------------------
+                # For a linear load w(x) = w1 + (w2-w1)*(x-x1)/(x2-x1)
+                # applied between x1 and x2, the centroid is:
+                #
+                #   x_cg = [x1*(2*w1 + w2) + x2*(w1 + 2*w2)] / [3*(w1 + w2)]
+                #
+                # This is the standard result from integrating x*w(x) dx
+                # over [x1, x2] and dividing by the resultant.
+                # -------------------------------------------------------
+                w_sum = w1_m + w2_m
+    
+                if abs(w_sum) > 1e-14:
+                    x_cg = (x1 * (2 * w1_m + w2_m) + x2 * (w1_m + 2 * w2_m)) / (3 * w_sum)
+                else:
+                    # Zero net load — no contribution to centroid
+                    x_cg = (x1 + x2) / 2
+    
+                sum_force_x += factor * resultant * x_cg
 
-                # Step through each load case and factor in the mass combo
-                for case, factor in mass_combo.factors.items():
-
-                    # Check if this load's case is in the mass combo
-                    if load_case == case:
-
-                        # Calculate the length of the distributed load
-                        length_loaded = x2 - x1
-
-                        # Convert the distributed load to a global vector
-                        if load_dir == 'Fx':
-                            w1_global = T_local.T() @ array([w1, 0, 0]) @ T_local
-                            w2_global = T_local.T() @ array([w2, 0, 0]) @ T_local
-                        elif load_dir == 'Fy':
-                            w1_global = T_local.T() @ array([0, w1, 0]) @ T_local
-                            w2_global = T_local.T() @ array([0, w2, 0]) @ T_local
-                        elif load_dir == 'Fz':
-                            w1_global = T_local.T() @ array([0, 0, w1]) @ T_local
-                            w2_global = T_local.T() @ array([0, 0, w2]) @ T_local
-                        elif load_dir == 'FX':
-                            w1_global = array([w1, 0, 0])
-                            w2_global = array([w2, 0, 0])
-                        elif load_dir == 'FY':
-                            w1_global = array([0, w1, 0])
-                            w2_global = array([0, w2, 0])
-                        elif load_dir == 'FZ':
-                            w1_global = array([0, 0, w1])
-                            w2_global = array([0, 0, w2])
-                        else:
-                            # Assume zero for any other load directions
-                            w1_global = array([0, 0, 0])
-                            w2_global = array([0, 0, 0])
-
-                        # Calculate the load component acting in the mass direction
-                        w1_m_comp = dot(w1_global, m_vector)
-                        w2_m_comp = dot(w2_global, m_vector)
-
-                        # Sum the average for the load component
-                        avg_load = (w1_m_comp + w2_m_comp)/2
-                        sum_force += factor*avg_load*length_loaded
-
-                        # Identify the point through which the load acts
-                        sum_force_x += factor*avg_load*(w2 - w1)*(w1_m_comp*(x2 - x1)**2/2
-                                                                  + 0.5*(w2_m_comp - w1_m_comp)*(x2 - x1)**2*(2/3))
-
-        # Identify the load's center of gravity
-        if sum_force_x != 0.0:
-            total_x = sum_force_x/sum_force
+        # ------------------------------------------------------------------
+        # Compute centroid and return
+        # ------------------------------------------------------------------
+        if abs(sum_force) > 1e-14:
+            total_x = sum_force_x / sum_force
         else:
-            total_x = self.L()/2
-
-        return [abs(sum_force/gravity), total_x]  # Mass is always positive
+            total_x = self.L() / 2
+    
+        # Clamp centroid to member bounds for safety
+        total_x = max(0.0, min(total_x, self.L()))
+    
+        return [abs(sum_force / gravity), total_x]  # Mass is always positive
 
     def m(self, mass_combo_name: str, mass_direction: str = 'Y', gravity: float = 1.0) -> NDArray[Any]:
         """
