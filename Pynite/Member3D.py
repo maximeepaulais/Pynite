@@ -353,83 +353,83 @@ class Member3D():
         return load_consistent + material_mass
 
     def _consistent_from_total_mass(self, total_mass: float) -> 'NDArray[float64]':
-    """Builds a consistent mass matrix from a known total mass.
-
-    Uses the same Euler-Bernoulli beam consistent mass formulation as
-    ``consistent_m``, but accepts an explicit total element mass rather
-    than deriving it from self-weight loads and material density.
-
-    The standard consistent mass matrix for a 3-D beam element is:
-
-        M = (m_total / 420) * [coefficient matrix]
-
-    where ``m_total`` is the total distributed mass over the element
-    length.  The 12×12 coefficient matrix is symmetric and couples
-    translational and rotational DOFs, which is critical for accurate
-    higher-mode frequencies.
-
-    Parameters
-    ----------
-    total_mass : float
-        The total mass attributed to this element from external loads
-        (in solver-consistent mass units, e.g. kN·s²/m when forces
-        are in kN and lengths in m).
-
-    Returns
-    -------
-    NDArray[float64]
-        12×12 consistent mass matrix in local coordinates.
-    """
-    from numpy import array, zeros
-
-    if abs(total_mass) < 1e-14:
-        return zeros((12, 12))
-
-    J = self.section.J
-    A = self.section.A
-    L = self.L()
-
-    #        dxi     dyi     dzi      rxi      ryi        rzi
-    #        dxj     dyj     dzj      rxj      ryj        rzj
-    m_coeff = array([
-        [140,    0,      0,       0,       0,         0,
-         70,     0,      0,       0,       0,         0        ],  # dxi
-
-        [0,      156,    0,       0,       0,         22*L,
-         0,      54,     0,       0,       0,         -13*L    ],  # dyi
-
-        [0,      0,      156,     0,       -22*L,     0,
-         0,      0,      54,      0,       13*L,      0        ],  # dzi
-
-        [0,      0,      0,       140*J/A, 0,         0,
-         0,      0,      0,       70*J/A,  0,         0        ],  # rxi
-
-        [0,      0,      -22*L,   0,       4*L**2,    0,
-         0,      0,      -13*L,   0,       -3*L**2,   0        ],  # ryi
-
-        [0,      22*L,   0,       0,       0,         4*L**2,
-         0,      13*L,   0,       0,       0,         -3*L**2  ],  # rzi
-
-        [70,     0,      0,       0,       0,         0,
-         140,    0,      0,       0,       0,         0        ],  # dxj
-
-        [0,      54,     0,       0,       0,         13*L,
-         0,      156,    0,       0,       0,         -22*L    ],  # dyj
-
-        [0,      0,      54,      0,       -13*L,     0,
-         0,      0,      156,     0,       22*L,      0        ],  # dzj
-
-        [0,      0,      0,       70*J/A,  0,         0,
-         0,      0,      0,       140*J/A, 0,         0        ],  # rxj
-
-        [0,      0,      13*L,    0,       -3*L**2,   0,
-         0,      0,      22*L,    0,       4*L**2,    0        ],  # ryj
-
-        [0,      -13*L,  0,       0,       0,         -3*L**2,
-         0,      -22*L,  0,       0,       0,         4*L**2   ],  # rzj
-    ])
-
-    return m_coeff * (abs(total_mass) / 420)
+        """Builds a consistent mass matrix from a known total mass.
+    
+        Uses the same Euler-Bernoulli beam consistent mass formulation as
+        ``consistent_m``, but accepts an explicit total element mass rather
+        than deriving it from self-weight loads and material density.
+    
+        The standard consistent mass matrix for a 3-D beam element is:
+    
+            M = (m_total / 420) * [coefficient matrix]
+    
+        where ``m_total`` is the total distributed mass over the element
+        length.  The 12×12 coefficient matrix is symmetric and couples
+        translational and rotational DOFs, which is critical for accurate
+        higher-mode frequencies.
+    
+        Parameters
+        ----------
+        total_mass : float
+            The total mass attributed to this element from external loads
+            (in solver-consistent mass units, e.g. kN·s²/m when forces
+            are in kN and lengths in m).
+    
+        Returns
+        -------
+        NDArray[float64]
+            12×12 consistent mass matrix in local coordinates.
+        """
+        from numpy import array, zeros
+    
+        if abs(total_mass) < 1e-14:
+            return zeros((12, 12))
+    
+        J = self.section.J
+        A = self.section.A
+        L = self.L()
+    
+        #        dxi     dyi     dzi      rxi      ryi        rzi
+        #        dxj     dyj     dzj      rxj      ryj        rzj
+        m_coeff = array([
+            [140,    0,      0,       0,       0,         0,
+             70,     0,      0,       0,       0,         0        ],  # dxi
+    
+            [0,      156,    0,       0,       0,         22*L,
+             0,      54,     0,       0,       0,         -13*L    ],  # dyi
+    
+            [0,      0,      156,     0,       -22*L,     0,
+             0,      0,      54,      0,       13*L,      0        ],  # dzi
+    
+            [0,      0,      0,       140*J/A, 0,         0,
+             0,      0,      0,       70*J/A,  0,         0        ],  # rxi
+    
+            [0,      0,      -22*L,   0,       4*L**2,    0,
+             0,      0,      -13*L,   0,       -3*L**2,   0        ],  # ryi
+    
+            [0,      22*L,   0,       0,       0,         4*L**2,
+             0,      13*L,   0,       0,       0,         -3*L**2  ],  # rzi
+    
+            [70,     0,      0,       0,       0,         0,
+             140,    0,      0,       0,       0,         0        ],  # dxj
+    
+            [0,      54,     0,       0,       0,         13*L,
+             0,      156,    0,       0,       0,         -22*L    ],  # dyj
+    
+            [0,      0,      54,      0,       -13*L,     0,
+             0,      0,      156,     0,       22*L,      0        ],  # dzj
+    
+            [0,      0,      0,       70*J/A,  0,         0,
+             0,      0,      0,       140*J/A, 0,         0        ],  # rxj
+    
+            [0,      0,      13*L,    0,       -3*L**2,   0,
+             0,      0,      22*L,    0,       4*L**2,    0        ],  # ryj
+    
+            [0,      -13*L,  0,       0,       0,         -3*L**2,
+             0,      -22*L,  0,       0,       0,         4*L**2   ],  # rzj
+        ])
+    
+        return m_coeff * (abs(total_mass) / 420)
 
     def consistent_m(self, mass_combo_name, gravity: float = 1.0) -> NDArray[float64]:
 
