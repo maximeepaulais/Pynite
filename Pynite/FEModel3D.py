@@ -2604,19 +2604,122 @@ class FEModel3D():
 
             Analysis._store_displacements(self, D1_mode, D2, D1_indices, D2_indices, mode_combo)
 
-        # Store results in the model
+        # ------------------------------------------------------------------
+        # Effective modal mass (mass participation) calculation
+        # ------------------------------------------------------------------
+        # For each global translational direction j (X, Y, Z), the effective
+        # modal mass of mode i is:
+        #
+        #   M_eff_i,j = (φᵢᵀ · M₁₁ · rⱼ)² / (φᵢᵀ · M₁₁ · φᵢ)
+        #
+        # where rⱼ is the influence vector (1 at translational DOFs in
+        # direction j among the free DOFs, 0 elsewhere).
+        #
+        # The total participating mass in direction j is:
+        #   M_total_j = rⱼᵀ · M₁₁ · rⱼ
+        #
+        # The mass participation ratio is M_eff_i,j / M_total_j.
+        # ------------------------------------------------------------------
+
+        if log:
+            print('- Calculating effective modal masses')
+    
+        n_free = M11.shape[0]  # Number of free DOFs (partitioned size)
+    
+        # Map each free DOF index back to its global DOF index so we can
+        # identify which translational direction it belongs to.
+        # D1_indices contains the global DOF indices of the free DOFs, in
+        # the same order as the rows/columns of M11 and K11.
+        D1_arr = np.asarray(D1_indices)
+    
+        # Build influence vectors for X, Y, Z translations among free DOFs.
+        # Global DOF layout per node: [DX, DY, DZ, RX, RY, RZ]
+        # So DX -> global_dof % 6 == 0, DY -> % 6 == 1, DZ -> % 6 == 2
+        direction_map = {'X': 0, 'Y': 1, 'Z': 2}
+        influence_vectors = {}
+        for dir_label, dof_offset in direction_map.items():
+            r = np.zeros(n_free)
+            r[D1_arr % 6 == dof_offset] = 1.0
+            influence_vectors[dir_label] = r
+    
+        # Convert M11 to CSR for efficient matrix-vector products
+        M11_csr = M11.tocsr()
+    
+        # Compute total translational mass in each direction (for ratios)
+        total_mass = {}
+        for dir_label, r in influence_vectors.items():
+            total_mass[dir_label] = float(r @ M11_csr @ r)
+    
+        # Compute effective modal mass for each mode and direction
+        # Results stored as list of dicts: [{'X': ..., 'Y': ..., 'Z': ...}, ...]
+        modal_masses = []       # Effective modal mass (absolute, in mass units)
+        modal_mass_ratios = []  # Effective modal mass / total mass (0..1)
+    
+        for i in range(len(frequencies)):
+            phi = eigenvectors[:, i]
+    
+            # Generalized mass: φᵢᵀ · M · φᵢ
+            m_gen = float(phi @ M11_csr @ phi)
+    
+            mode_mass = {}
+            mode_ratio = {}
+    
+            for dir_label, r in influence_vectors.items():
+                # Modal participation factor: L = φᵢᵀ · M · rⱼ
+                L = float(phi @ M11_csr @ r)
+    
+                # Effective modal mass: L² / m_gen
+                if abs(m_gen) > 1e-30:
+                    m_eff = L ** 2 / m_gen
+                else:
+                    m_eff = 0.0
+    
+                mode_mass[dir_label] = m_eff
+    
+                # Mass participation ratio
+                if total_mass[dir_label] > 1e-30:
+                    mode_ratio[dir_label] = m_eff / total_mass[dir_label]
+                else:
+                    mode_ratio[dir_label] = 0.0
+    
+            modal_masses.append(mode_mass)
+            modal_mass_ratios.append(mode_ratio)
+
+        # ------------------------------------------------------------------
+        # Store all results on the model
+        # ------------------------------------------------------------------
         self.frequencies = frequencies
+        self.modal_masses = modal_masses            # List[Dict[str, float]]
+        self.modal_mass_ratios = modal_mass_ratios  # List[Dict[str, float]]
+        self.total_mass = total_mass                # Dict[str, float]
+        
+        # Flag the model as having modal results
+        self.solution = 'Modal'
 
         if log:
             print('- Modal analysis complete')
 
         # Flag the model as having modal results
         self.solution = 'Modal'
-
+    
         if log:
             print(f'- Found {len(frequencies)} modes')
+            print('')
+            print(f'  {"Mode":>4}  {"Freq (Hz)":>10}  {"Meff,X":>10}  {"Meff,Y":>10}  {"Meff,Z":>10}  {"%X":>6}  {"%Y":>6}  {"%Z":>6}')
+            print(f'  {"----":>4}  {"---------":>10}  {"------":>10}  {"------":>10}  {"------":>10}  {"--":>6}  {"--":>6}  {"--":>6}')
             for i, freq in enumerate(frequencies):
-                print(f'  Mode {i + 1}: {freq:.3f} Hz')
+                mm = modal_masses[i]
+                mr = modal_mass_ratios[i]
+                print(f'  {i+1:4d}  {freq:10.3f}  {mm["X"]:10.4f}  {mm["Y"]:10.4f}  {mm["Z"]:10.4f}  {mr["X"]*100:5.1f}%  {mr["Y"]*100:5.1f}%  {mr["Z"]*100:5.1f}%')
+    
+            # Print cumulative participation
+            cumX = sum(mr['X'] for mr in modal_mass_ratios) * 100
+            cumY = sum(mr['Y'] for mr in modal_mass_ratios) * 100
+            cumZ = sum(mr['Z'] for mr in modal_mass_ratios) * 100
+            print(f'  {"":>4}  {"":>10}  {"":>10}  {"":>10}  {"":>10}  {cumX:5.1f}%  {cumY:5.1f}%  {cumZ:5.1f}%  (cumulative)')
+            print('')
+            print(f'  Total translational mass:  X={total_mass["X"]:.4f}  Y={total_mass["Y"]:.4f}  Z={total_mass["Z"]:.4f}')
+            print('')
             print('- Modal analysis complete')
 
     def _not_ready_yet_analyze_pushover(self, log=False, check_stability=True, push_combo='Push', max_iter=30, tol=0.01, sparse=True, combo_tags=None):
