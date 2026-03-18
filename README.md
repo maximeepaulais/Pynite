@@ -68,7 +68,19 @@ Here's a list of projects that use Pynite:
 * Phaenotyp (https://github.com/bewegende-Architektur/Phaenotyp) (https://youtu.be/shloSw9HjVI)
 
 # What's New?
-v2.2.2 (in progress)
+2.4.2 (in progress)
+* Removed individual load combo plots from member plots when an envelope plot is requested. They cluttered the plots without adding much value.
+
+2.4.1
+* Fixed a bug where enveloped results did not work if both tagged and untagged combos were in a model.
+
+2.4.0
+* Member `max` and `min` methods now return governing load combination along with the member max/min forces.
+* Bug fix: Quadrilateral element displacements had corners swapped during VTK visualization. This was a relic from the old MITC4 formulation that has been corrected.
+
+v2.3.0
+* Added enveloping to member diagrams. Set `combo_name` to a list of combo tags and the member diagram will show an envelope of all the combos that have any of those tags.
+* Bug fix: Added shear wall and mat foundation load cases to `FEModel3D.load_cases()`. The list of load cases was sometimes incomplete if these meshes had not yet been generated.
 * Added bending moment end releases to visualizations.
 * Bug fix for shear walls with flanges having an origin with their origin at Y != 0.
 * Rectangular meshes now filter out user defined control points that erroneously lie outside their boudaries.
