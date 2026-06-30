@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath('../..'))
 project = 'Pynite'
 copyright = '2023, D. Craig Brinck, SE'
 author = 'D. Craig Brinck, SE'
-release = '2.4.0'
+release = '3.0.0'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -32,7 +32,7 @@ autoclass_content = 'class'
 autodoc_mock_imports = ['numpy', 'IPython', 'vtk', 'pdfkit', 'prettytable', 'matplotlib', 'matplotlib.pyplot', 'pyvista']  # Mock import dependencies
 
 templates_path = ['_templates']
-exclude_patterns = ['pushover.rst']
+exclude_patterns = []
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
